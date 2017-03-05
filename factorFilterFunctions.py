@@ -232,4 +232,28 @@ def calAdjustedPrice():
     AdjFacforward = AdjFacBackward/AdjFacBackward.max()
     adjustedPrice = (AdjFacforward*PriceToAdj).round(5)
     adjustedPrice.to_csv(data_path+'my_own_factor_AdjustedPriceForward.csv')
-
+    
+# this is to show the corelation between two risk factors
+# Return: Dataframe that contains both PEARSON and SPEARMAN correlation
+# Input: 
+# factor1: DATAFRAME, DF of factor1(can either be the raw data or the nuetralized one)
+# factor2: DATAFRAME
+# datelist: LIST, which contains the date u want to calc correlation
+# filterdic: DICTIONARY, the KEY of which is the Date of datelist and the VALUE is LIST of the filtered stocks
+# \Same as winsorAndnorm function 
+def showCorrelation(factor1, factor2, datelist, filterdic=None)
+    corrDF = pd.DataFrame(index = datelist, columns=['Pearson','Spearman'], data = None)
+    for date in datelist:
+        factorIndice1 = factor1.loc[date].dropna()
+        factorIndice2 = factor2.loc[date].dropna()
+        if not filterdic:
+            intersections = list(set(factorIndice1.index) & set(factorIndice2.index))
+        else:
+            intersections = list((set(factorIndice1.index) & set(factorIndice2.index)) - set(filterdic[date])
+        factorTrueValue1 = factorIndice1.loc[intersections].astype(float)
+        facttorTrueValue2 = factorIndice2.loc[intersections] .astype(float)
+        corrDF.loc[date]['Pearson'] =  factorTrueValue1.corr(factorTrueValue2.loc[intersections],\
+                                                                                   method='pearson')
+        corrDF.loc[date]['Spearman'] =  factorTrueValue1.corr(factorTrueValue2.loc[intersections],\
+                                                                                   method='spearman')
+    return  corrDF
