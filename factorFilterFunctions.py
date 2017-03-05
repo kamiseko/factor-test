@@ -241,7 +241,7 @@ def calAdjustedPrice():
 # datelist: LIST, which contains the date u want to calc correlation
 # filterdic: DICTIONARY, the KEY of which is the Date of datelist and the VALUE is LIST of the filtered stocks
 # \Same as winsorAndnorm function 
-def showCorrelation(factor1, factor2, datelist, filterdic=None)
+def showCorrelation(factor1, factor2, datelist, filterdic=None):
     corrDF = pd.DataFrame(index = datelist, columns=['Pearson','Spearman'], data = None)
     for date in datelist:
         factorIndice1 = factor1.loc[date].dropna()
