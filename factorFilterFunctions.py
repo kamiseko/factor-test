@@ -9,7 +9,7 @@ import statsmodels.api as sm
 import scipy.stats
 import os
 from sklearn import linear_model
-from datetime import datetime,time,date
+from datetime import datetime, time, date
 import matplotlib.pyplot as plt
 import seaborn as sns
 import config as cf
@@ -123,7 +123,7 @@ def adjustedBoxplot(a): # x is a np.array
 # IndustryDF : DATAFRAME , the Industry Class u use, default it's ZX INDUSTRY
 # datelist : LIST , date list should be same through all functions!
 def neutralizeFactor(normalizedFactorDF, normalizedLFCAPDF, IndustryDF, datelist):
-    factorNeutralized = pd.DataFrame(index = normalizedFactorDF.index, columns=normalizedFactorDF.columns, data= None)
+    factorNeutralized = pd.DataFrame(index=normalizedFactorDF.index, columns=normalizedFactorDF.columns, data=None)
     for date in datelist:
         LFCAPIndice = normalizedLFCAPDF.loc[date].dropna()
         factorIndice = normalizedFactorDF.loc[date].dropna()
@@ -138,10 +138,10 @@ def neutralizeFactor(normalizedFactorDF, normalizedLFCAPDF, IndustryDF, datelist
 def  generateIndDF(data_path,filename,timeStamp):
     InData = pd.read_csv(data_path+filename, infer_datetime_format=True,parse_dates=[0], index_col=0)
     #InData= InData.tail(timeStamp+5)[-timeStamp-1:-1].dropna(axis=1,how='any')
-    InData = InData.tail(timeStamp+5)[-11:-1].dropna(axis=1,how='any')
+    InData = InData.tail(timeStamp+5)[-11:-1].dropna(axis=1, how='any')
     InduNum = int(InData.max().max()-InData.min().min())
     x = range(InduNum)
-    DummyDF = pd.DataFrame(index=x,columns=InData.columns.tolist(),data=None)
+    DummyDF = pd.DataFrame(index=x, columns=InData.columns.tolist(), data=None)
     for stk in DummyDF.columns.tolist():
         Tag = int(InData[stk].iloc[-1])
         if Tag == InduNum+1:
@@ -216,6 +216,31 @@ def getStockGroup(factorData, groupNum=10, Mean_Num=20, ascendingFlag = True):
                                                      i*stkNumPerGFloor:remainderCount+(i+1)*stkNumPerGFloor].index.tolist()
     return groupDic
 
+# this is to show the corelation between two risk factors
+# Return: Dataframe that contains both PEARSON and SPEARMAN correlation
+# Input:
+# factor1: DATAFRAME, DF of factor1(can either be the raw data or the nuetralized one)
+# factor2: DATAFRAME
+# datelist: LIST, which contains the date u want to calc correlation
+# filterdic: DICTIONARY, the KEY of which is the Date of datelist and the VALUE is LIST of the filtered stocks
+# \Same as winsorAndnorm function
+def showCorrelation(factor1, factor2, datelist, filterdic = None):
+    corrDF = pd.DataFrame(index=datelist, columns=['Pearson', 'Spearman'], data=None, dtype=float)
+    for date in datelist:
+        factorIndice1 = factor1.loc[date].dropna()
+        factorIndice2 = factor2.loc[date].dropna()
+        if not filterdic:
+            intersections = list(set(factorIndice1.index) & set(factorIndice2.index))
+        else:
+            intersections = list((set(factorIndice1.index) & set(factorIndice2.index)) - set(filterdic[date]))
+        factorTrueValue1 = factorIndice1.loc[intersections].astype(float)
+        factorTrueValue2 = factorIndice2.loc[intersections] .astype(float)
+        corrDF.loc[date]['Pearson'] = factorTrueValue1.corr(factorTrueValue2.loc[intersections],
+                                                                                   method='pearson')
+        corrDF.loc[date]['Spearman'] = factorTrueValue1.corr(factorTrueValue2.loc[intersections],
+                                                                                   method='spearman')
+    return corrDF
+
 
 # this is to update the  forward adjusted Price
 # this calculation need  the additional files, namely AdjustedFactor and Price dataframe
@@ -232,28 +257,7 @@ def calAdjustedPrice():
     AdjFacforward = AdjFacBackward/AdjFacBackward.max()
     adjustedPrice = (AdjFacforward*PriceToAdj).round(5)
     adjustedPrice.to_csv(data_path+'my_own_factor_AdjustedPriceForward.csv')
-    
-# this is to show the corelation between two risk factors
-# Return: Dataframe that contains both PEARSON and SPEARMAN correlation
-# Input: 
-# factor1: DATAFRAME, DF of factor1(can either be the raw data or the nuetralized one)
-# factor2: DATAFRAME
-# datelist: LIST, which contains the date u want to calc correlation
-# filterdic: DICTIONARY, the KEY of which is the Date of datelist and the VALUE is LIST of the filtered stocks
-# \Same as winsorAndnorm function 
-def showCorrelation(factor1, factor2, datelist, filterdic=None):
-    corrDF = pd.DataFrame(index = datelist, columns=['Pearson','Spearman'], data = None)
-    for date in datelist:
-        factorIndice1 = factor1.loc[date].dropna()
-        factorIndice2 = factor2.loc[date].dropna()
-        if not filterdic:
-            intersections = list(set(factorIndice1.index) & set(factorIndice2.index))
-        else:
-            intersections = list((set(factorIndice1.index) & set(factorIndice2.index)) - set(filterdic[date])
-        factorTrueValue1 = factorIndice1.loc[intersections].astype(float)
-        facttorTrueValue2 = factorIndice2.loc[intersections] .astype(float)
-        corrDF.loc[date]['Pearson'] =  factorTrueValue1.corr(factorTrueValue2.loc[intersections],\
-                                                                                   method='pearson')
-        corrDF.loc[date]['Spearman'] =  factorTrueValue1.corr(factorTrueValue2.loc[intersections],\
-                                                                                   method='spearman')
-    return  corrDF
+
+
+
+
