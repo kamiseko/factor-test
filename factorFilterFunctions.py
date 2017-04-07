@@ -37,7 +37,7 @@ def GetSTNewSuspend(Date, stDF, tradeDayDF, stopFlagDF):  # Date is DateFrame ti
     return list(totalList)
 
 
-# This function to get he end of trading day of each month!
+# This function to get the end of trading day of each month!
 # Return: two LIST, that contains the start and end date of each month!
 # Inputs:
 # datetimeIndex : dataframe.index/series.index
@@ -56,12 +56,13 @@ def getLastDayOfMonth(datetimeIndex):     # This datetimeIndex should be chosen 
 # Return: DATAFRAME
 # Inputs:
 # filename: STRING, the filename of the csv file
-# timeStampNum: INT, the time period of the backtest
+# startDate: DATETIME , converted from string ,eg：('20130205')
+# endDate: DATETIME,
 # ThresholdNum: INT, the thresholdNum of valid data to drop na
-def getData(filename, timeStampNum, thresholdNum):
+def getData(filename, thresholdNum, startDate, endDate):
     factorData = pd.read_csv(data_path+filename, infer_datetime_format=True, parse_dates=[0], index_col=0)
-    factorData = factorData[-timeStampNum-1:-5]
-    enoughDataStock = factorData.isnull().sum() < (timeStampNum*thresholdNum)
+    factorData = factorData.loc[startDate:endDate]
+    enoughDataStock = factorData.isnull().sum() < (factorData.shape[0]*thresholdNum)
     enoughDataStockList = enoughDataStock[enoughDataStock == True].index.tolist()
     factorData = factorData[enoughDataStockList]
     factorData = factorData.fillna(method='ffill')   ### Fill N/A value with the last valid obsevation
@@ -97,6 +98,7 @@ def winsorAndnorm(data, filterdict, datelist):
 # Boxplot method adjusted by MedCouple to winsorize
 # Return two FLOAT
 # Input : ARRAY
+# u can also use statsmodels.stats.stattools to calcculate mc(literally p in this function)
 def adjustedBoxplot(a): # x is a np.array
     medianofa = np.median(a)
     lowergroup = a[a <= np.median(a)]
@@ -123,7 +125,8 @@ def adjustedBoxplot(a): # x is a np.array
 # IndustryDF : DATAFRAME , the Industry Class u use, default it's ZX INDUSTRY
 # datelist : LIST , date list should be same through all functions!
 def neutralizeFactor(normalizedFactorDF, normalizedLFCAPDF, IndustryDF, datelist):
-    factorNeutralized = pd.DataFrame(index=normalizedFactorDF.index, columns=normalizedFactorDF.columns, data=None)
+    factorNeutralized = pd.DataFrame(index=normalizedFactorDF.index, columns=normalizedFactorDF.columns, data=None,
+                                     dtype=float)
     for date in datelist:
         LFCAPIndice = normalizedLFCAPDF.loc[date].dropna()
         factorIndice = normalizedFactorDF.loc[date].dropna()
@@ -184,7 +187,10 @@ def calReturnAndIC(returnofFactor,tValueofFactor,pValueofFactor,ICFactor,factorN
         factorIndice = factorNeutralized.loc[date].dropna()
         activeReturnIndice = activeReturn.loc[date].dropna()
         intersections = list(set(factorIndice.index) & set(activeReturnIndice.index))
-        result = sm.OLS(activeReturnIndice.loc[intersections], factorIndice.loc[intersections].astype(float)).fit()
+        try:
+            result = sm.OLS(activeReturnIndice.loc[intersections], factorIndice.loc[intersections].astype(float)).fit()
+        except:
+            print date  # catch error
         returnofFactor.loc[date][factorName] = result.params[0]
         tValueofFactor.loc[date][factorName] = result.tvalues[0]
         pValueofFactor.loc[date][factorName] = result.pvalues[0]
