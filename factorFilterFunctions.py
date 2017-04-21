@@ -19,14 +19,16 @@ data_path = cf.datapath
 #thresholdNum = 0.2
 
 
-# get the list of ST, new  and delisted stocks on given date
-# Return: LIST  that contains all badass stocks!
-# Inputs:
-# Date: TIMESTAMP or DATETIME , basically it's retrieved from the datelist
-# stDF: DATAFRAME, contains the all stocks with ST FLAG
-# tradeDayDF: DATAFRAME, which specifies the TRADING  DAY of all stocks
-# stopFlagDF: DATAFRAME, which specifies the DELIST stocks
+
 def GetSTNewSuspend(Date, stDF, tradeDayDF, stopFlagDF):  # Date is DateFrame time Index with hour second
+    '''get the list of ST, new  and delisted stocks on given date
+    Return: LIST  that contains all badass stocks!
+    Inputs:
+    Date: TIMESTAMP or DATETIME , basically it's retrieved from the datelist
+    stDF: DATAFRAME, contains the all stocks with ST FLAG
+    tradeDayDF: DATAFRAME, which specifies the TRADING  DAY of all stocks
+    stopFlagDF: DATAFRAME, which specifies the DELIST stocks
+    '''
     tempoDF1 = stDF.loc[Date]
     tempoDF2 = tradeDayDF.loc[Date]
     tempoDF3 = stopFlagDF.loc[Date]
@@ -37,29 +39,34 @@ def GetSTNewSuspend(Date, stDF, tradeDayDF, stopFlagDF):  # Date is DateFrame ti
     return list(totalList)
 
 
-# This function to get the end of trading day of each month!
-# Return: two LIST, that contains the start and end date of each month!
-# Inputs:
-# datetimeIndex : dataframe.index/series.index
-def getLastDayOfMonth(datetimeIndex):     # This datetimeIndex should be chosen as dataframe.index
-    timeTuple = sorted(list(set(zip(datetimeIndex.year,datetimeIndex.month))))
+
+def getLastDayOfMonth(datetimeIndex):
+    '''This function to get the end of trading day of each month!
+    This datetimeIndex should be chosen as dataframe.index
+    Return: two LIST, that contains the start and end date of each month!
+    Inputs:
+    datetimeIndex : dataframe.index/series.index
+    '''
+    timeTuple = sorted(list(set(zip(datetimeIndex.year, datetimeIndex.month))))
     #print timeTuple
     startOftheMonth = []
     endOftheMonth = []
     for time in timeTuple:
-        targetList = datetimeIndex[(datetimeIndex.year==time[0])&(datetimeIndex.month==time[1])]
+        targetList = datetimeIndex[(datetimeIndex.year==time[0]) & (datetimeIndex.month==time[1])]
         startOftheMonth.append(targetList[0])
         endOftheMonth.append(targetList[-1])
     return startOftheMonth, endOftheMonth
 
-# prepare data. filter data by the length of valid data
-# Return: DATAFRAME
-# Inputs:
-# filename: STRING, the filename of the csv file
-# startDate: DATETIME , converted from string ,eg：('20130205')
-# endDate: DATETIME,
-# ThresholdNum: INT, the thresholdNum of valid data to drop na
+
 def getData(filename, thresholdNum, startDate, endDate):
+    '''prepare data. filter data by the length of valid data
+    Return: DATAFRAME
+    Inputs:
+    filename: STRING, the filename of the csv file
+    startDate: DATETIME , converted from string ,eg：('20130205')
+    endDate: DATETIME,
+    ThresholdNum: INT, the thresholdNum of valid data to drop na
+    '''
     factorData = pd.read_csv(data_path+filename, infer_datetime_format=True, parse_dates=[0], index_col=0)
     factorData = factorData.loc[startDate:endDate]
     enoughDataStock = factorData.isnull().sum() < (factorData.shape[0]*thresholdNum)
@@ -70,17 +77,19 @@ def getData(filename, thresholdNum, startDate, endDate):
     return factorData
 
 # ------------------------------- the following part is to winsorize normalize and neutralize-------------------------
-# Winsorize and  Normalize in One function!!
-# The following function is designed to Winsorize by  MAD METHOD! U can also define the method by ur self. \
-# Just like the adjustedBoxplot method below.
-# Return a DATAFRAME
-# Inputs :
-# data: DATAFRAME that has NO NAN VALUE
-# filterdict: DICTIONARY .the filtered stocks that  obtained from GetSTNewSuspend ,\
-# KEY is the date and VALUE is the stocks that should
-# filtered out  on that date.
-# datelist : LIST. that contains the date.
+
 def winsorAndnorm(data, filterdict, datelist):
+    '''Winsorize and  Normalize in One function!!
+    The following function is designed to Winsorize by  MAD METHOD! U can also define the method by ur self. \
+    Just like the adjustedBoxplot method below.
+    Return a DATAFRAME
+    Inputs :
+    data: DATAFRAME that has NO NAN VALUE
+    filterdict: DICTIONARY .the filtered stocks that  obtained from GetSTNewSuspend ,\
+    KEY is the date and VALUE is the stocks that should
+    filtered out  on that date.
+    datelist : LIST. that contains the date.
+    '''
     dataWinsorized = data.copy()
     for date in datelist:
         remainedStocks = list(set(data.columns.tolist()) - set(filterdict[date]))
@@ -94,8 +103,37 @@ def winsorAndnorm(data, filterdict, datelist):
         dataWinsorizedTrans.median(skipna=True)-3*MAD
     return ((dataWinsorizedTrans - dataWinsorizedTrans.mean(axis=0, skipna=True))/dataWinsorizedTrans.std(axis=0, skipna=True)).T
 
+# Adjusted boxplot method to winsorize and then Normalize
+def adjBoxplot(factorData):
+    '''To calculate  adjusted -boxplot winsorized data and then Normalize the outcome
+    Output: Dataframe, the winsorized and normalized data
+    Input:
+    factorData:Dataframe, raw data, can contain nan value
+    '''
+    copyData = factorData.copy()
+    for i in copyData.index:
+        temp = copyData.loc[i]
+        x = temp.dropna().values
+        if len(x) > 0:
+            mc = sm.stats.stattools.medcouple(x)
+            x.sort()
+            q1 = x[int(0.25*len(x))]
+            q3 = x[int(0.75*len(x))]
+            iqr = q3-q1
+            if mc >= 0:
+                l = q1-1.5*np.exp(-3.5*mc)*iqr
+                u = q3+1.5*np.exp(4*mc)*iqr
+            else:
+                l = q1-1.5*np.exp(-4*mc)*iqr
+                u = q3+1.5*np.exp(3.5*mc)*iqr
+            temp.loc[temp < l] = l
+            temp.loc[temp > u] = u
+            #factor_data.loc[i] = (temp-temp.mean())/temp.std()
+    Trans = copyData.T
+    return ((Trans - Trans .mean(axis=0, skipna=True))/Trans .std(axis=0, skipna=True)).T
 
-# Boxplot method adjusted by MedCouple to winsorize
+
+'''# Boxplot method adjusted by MedCouple to winsorize
 # Return two FLOAT
 # Input : ARRAY
 # u can also use statsmodels.stats.stattools to calcculate mc(literally p in this function)
@@ -116,15 +154,18 @@ def adjustedBoxplot(a): # x is a np.array
     L = q25 - 1.5*np.exp(-3.5*p)*iqr if p >= 0 else q25-1.5*np.exp(-4*p)*iqr
     U = q75 + 1.5*np.exp(4*p)*iqr if p >= 0 else q75+1.5*np.exp(3.5*p)*iqr
     return L, U
+'''
 
-# Neutralize factor
-# Returns a DATAFRAME
-# Inputs are like:
-# normalizedFactorDF: DATAFRAME , the FACTOR data that was  winsorized and normalized.
-# normalizedLFCAPDF:  DATAFRAME , the CIRCULATION MARKET VALUE that was winsorized and normalized and Take log
-# IndustryDF : DATAFRAME , the Industry Class u use, default it's ZX INDUSTRY
-# datelist : LIST , date list should be same through all functions!
+
 def neutralizeFactor(normalizedFactorDF, normalizedLFCAPDF, IndustryDF, datelist):
+    '''# Neutralize factor
+    # Returns a DATAFRAME
+    # Inputs are like:
+    # normalizedFactorDF: DATAFRAME , the FACTOR data that was  winsorized and normalized.
+    # normalizedLFCAPDF:  DATAFRAME , the CIRCULATION MARKET VALUE that was winsorized and normalized and Take log
+    # IndustryDF : DATAFRAME , the Industry Class u use, default it's ZX INDUSTRY
+    # datelist : LIST , date list should be same through all functions!
+    '''
     factorNeutralized = pd.DataFrame(index=normalizedFactorDF.index, columns=normalizedFactorDF.columns, data=None,
                                      dtype=float)
     for date in datelist:
@@ -157,14 +198,16 @@ def  generateIndDF(data_path,filename,timeStamp):
 
 # -------------------------the following part is to calculate the monthly return/IC of the given factor----------------
 
-# To calculate the return or the active return of given date
-# return: DATAFRAME ,that contains the RETURN/ACTIVE RETURN of each stock
-# Inputs:
-# priceData: DATAFRAME ,which is obtained from getData function
-# benchmark: DATAFRAME, same as priceData but the filter by threshold part could be deleted
-# datelist: LIST ,which contains the dates.
-# activeReturn : Boolean Value. True to calculate ACTIVE RETURN
+
 def calcReturn(priceData,datelist,benchmark = None,activeReturn = True, logReturn = True):
+    '''# To calculate the return or the active return of given date
+    # Return: DATAFRAME ,that contains the RETURN/ACTIVE RETURN of each stock
+    # Inputs:
+    # priceData: DATAFRAME ,which is obtained from getData function
+    # benchmark: DATAFRAME, same as priceData but the filter by threshold part could be deleted
+    # datelist: LIST ,which contains the dates.
+    # activeReturn : Boolean Value. True to calculate ACTIVE RETURN
+    '''
     returnOfStocks = np.log((priceData.loc[datelist].shift(-1)/priceData.loc[datelist]).iloc[:-1]) if logReturn is True\
             else priceData.loc[datelist].pct_change().shift(-1).iloc[:-1]
     if activeReturn:
@@ -175,14 +218,16 @@ def calcReturn(priceData,datelist,benchmark = None,activeReturn = True, logRetur
     return returnOfStocks
 
 
-# This is to calculate monthly return fo the given factor, P-value, T-value, and  IC.
-# Update the four Given DATAFRAME
-# Inputs:
-# factorNeutralized : DATAFRAME ,the dataframe get from neutralizeFactor()
-# activeReturn : DATAFRAME , get from calcReturn()
-# facotName : STRING , the name of the factor.
-# Warning : THE FOUR DATAFRAME SHOULD DEFINED BEFORE USING THIS FUNCTION
+
 def calReturnAndIC(returnofFactor,tValueofFactor,pValueofFactor,ICFactor,factorNeutralized,activeReturn,factorName):
+    '''# This is to calculate monthly return fo the given factor, P-value, T-value, and  IC.
+    # Update the four Given DATAFRAME
+    # Inputs:
+    # factorNeutralized : DATAFRAME ,the dataframe get from neutralizeFactor()
+    # activeReturn : DATAFRAME , get from calcReturn()
+    # facotName : STRING , the name of the factor.
+    # Warning : THE FOUR DATAFRAME SHOULD DEFINED BEFORE USING THIS FUNCTION
+    '''
     for date in activeReturn.index:
         factorIndice = factorNeutralized.loc[date].dropna()
         activeReturnIndice = activeReturn.loc[date].dropna()
@@ -202,7 +247,10 @@ def calReturnAndIC(returnofFactor,tValueofFactor,pValueofFactor,ICFactor,factorN
 # This function is to calculate the stocks grouped based by factor value,u cam also use 'quantile' method to get the \
 # groups
 def getStockGroup(factorData, groupNum=10, Mean_Num=20, ascendingFlag = True):
+    '''# This function is to calculate the stocks grouped based by factor value,u cam also use 'quantile'
+    method to get the groups
     #factorData is disposed data which have been winsorized, normalized and neutralized
+    '''
     groupDic = {}
     if Mean_Num == 1:
         sortedStk = factorData.iloc[-1].dropna().sort_values(ascending=ascendingFlag)
@@ -222,15 +270,17 @@ def getStockGroup(factorData, groupNum=10, Mean_Num=20, ascendingFlag = True):
                                                      i*stkNumPerGFloor:remainderCount+(i+1)*stkNumPerGFloor].index.tolist()
     return groupDic
 
-# this is to show the corelation between two risk factors
-# Return: Dataframe that contains both PEARSON and SPEARMAN correlation
-# Input:
-# factor1: DATAFRAME, DF of factor1(can either be the raw data or the nuetralized one)
-# factor2: DATAFRAME
-# datelist: LIST, which contains the date u want to calc correlation
-# filterdic: DICTIONARY, the KEY of which is the Date of datelist and the VALUE is LIST of the filtered stocks
-# \Same as winsorAndnorm function
+
 def showCorrelation(factor1, factor2, datelist, filterdic = None):
+    '''# this is to show the corelation between two risk factors
+    # Return: Dataframe that contains both PEARSON and SPEARMAN correlation
+    # Input:
+    # factor1: DATAFRAME, DF of factor1(can either be the raw data or the nuetralized one)
+    # factor2: DATAFRAME
+    # datelist: LIST, which contains the date u want to calc correlation
+    # filterdic: DICTIONARY, the KEY of which is the Date of datelist and the VALUE is LIST of the filtered stocks
+    # \Same as winsorAndnorm function
+    '''
     corrDF = pd.DataFrame(index=datelist, columns=['Pearson', 'Spearman'], data=None, dtype=float)
     for date in datelist:
         factorIndice1 = factor1.loc[date].dropna()

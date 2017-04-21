@@ -120,3 +120,35 @@ def multiFactorReg(returndf,factorDict,WLS =False, weightdf = None):
         factorPvalue . loc[date] = result.pvalues.values
         RSquare .loc[date] = result.rsquared
     return specificReturn, factorReturn, factorPvalue, RSquare
+
+
+# calculate adjusted factor covriance matrix
+def calFinlCov(ewmMatrix, benchMarkWeight, benchMarkRet, riskExposureDF, finalSpMat, compara=1 / 0.94 - 1):
+    '''
+    To calculate final to optimize covriance, with factor covriance matrix adjusted by Barra method,
+    P32 ,chapter-2,Barra Risk Model Handbook.
+
+    Output: Dataframe, namely adjusted factor covariance matrix(k*k, k is the factor amount).
+
+    Inpput:
+    ewmMatrix: Dataframe, the factor covariance matrix calculated directell by the outcome of multiFactorReg.
+    benchMarkWeight: Dataframe or Series, benchMarkWeight of the stocks on a given date!.
+    benchMarkRet: Dataframe or Series, notice the index !
+    riskExposureDF: Dataframe , riskExposureDF of stocks on factors in specific date.
+    finalSpMat: Dataframe, the digonal covriance matrix of specific returns.
+    '''
+
+    # calculate monthly scaled variance  forecast for the market index by DEWIV
+    alphaS = 21 * benchMarkRet.ewm(ignore_na=True, min_periods=0, com=compara).cov(pairwise=True)[-200:].iloc[-1]
+    # calculate monthly specific risk of the market index
+    alphaSP = reduce(lambda x, y: x.dot(y), [benchMarkWeight, finalSpMat, benchMarkWeight.T])
+    # calculate total variance of the market index
+    alphaM = (
+    reduce(lambda x, y: x.dot(y), [benchMarkWeight, riskExposureDF, ewmMatrix, riskExposureDF.T, benchMarkWeight.T])
+                + alphaSP)
+    # can not use np.dot on two series to construct a matrix
+    benchMarkWeightDF = pd.DataFrame(benchMarkWeight)
+    lastPart = reduce(lambda x, y: x.dot(y), [ewmMatrix, riskExposureDF.T, benchMarkWeightDF,
+                                              benchMarkWeightDF.T, riskExposureDF, ewmMatrix])
+    finalCovMatrix = ewmMatrix + ((alphaS - alphaM) / (alphaS - alphaSP)) * lastPart
+    return finalCovMatrix
