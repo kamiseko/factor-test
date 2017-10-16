@@ -13,12 +13,47 @@ from datetime import datetime, time, date
 import matplotlib.pyplot as plt
 import seaborn as sns
 import config as cf
+import h5py
 
 data_path = cf.datapath
 #timeStampNum = 500
 #thresholdNum = 0.2
 
 
+
+def readh5data(path, filename):
+    ''' Read h5 file and convert data into dataframe
+    Return: DataFrame,the target data
+    Inputs
+    path: STRING, the path of the h5 file
+    filename: STRING, the name of the h5 file '''
+    h5file = h5py.File(os.path.join(path, filename), "r+")
+    indexList = h5file["date"].value
+    indexList = [str(date) for date in indexList]
+    header = h5file["header"].value
+    data = h5file["data"].value
+    df = pd.DataFrame(index=indexList, columns=header, data=data, dtype=float)
+    df.index = pd.to_datetime(df.index)
+    df.index.name = 'date'
+    h5file.close()
+    return df
+
+def saveh5data(data,path,filename):
+    ''' Read h5 file and convert data into dataframe
+    Return: DataFrame,the target data
+    Inputs
+    data: Dataframe, the dataframe data
+    path: STRING, the path of the h5 file
+    filename: STRING, the name of the h5 file to save .Note here postfix(.h5) is not needed here'''
+    header = np.array(data.columns).astype('str')
+    date = [int(date.strftime('%Y%m%d')) for date in data.index]
+    #body = changetype(data.values, typeflag)
+    h5file = h5py.File(os.path.join(path, filename + '.h5'), "w")
+    h5file.create_dataset("header", data=header, compression="gzip")
+    h5file.create_dataset("date", data=date)
+    h5file.create_dataset("data", data=data.values, compression="gzip")
+    #h5file.create_dataset("timestamp", data=[timestamp])
+    h5file.close()
 
 def GetSTNewSuspend(Date, stDF, tradeDayDF, stopFlagDF):  # Date is DateFrame time Index with hour second
     '''get the list of ST, new  and delisted stocks on given date
@@ -32,9 +67,10 @@ def GetSTNewSuspend(Date, stDF, tradeDayDF, stopFlagDF):  # Date is DateFrame ti
     tempoDF1 = stDF.loc[Date]
     tempoDF2 = tradeDayDF.loc[Date]
     tempoDF3 = stopFlagDF.loc[Date]
-    stockList1 = tempoDF1[~tempoDF1.isnull()].index.tolist()
+    #stockList1 = tempoDF1[~tempoDF1.isnull()].index.tolist()  # for csv file
+    stockList1 = tempoDF1[tempoDF1 == 1].index.tolist()  # for h5 file
     stockList2 = tempoDF2[tempoDF2 < 60].index.tolist()
-    stockList3 = tempoDF3[~tempoDF3.isnull()].index.tolist()
+    stockList3 = tempoDF3[tempoDF3 != 0].index.tolist()   # for csv file
     totalList = set(list(set(stockList1) | set(stockList2) | set(stockList3)))
     return list(totalList)
 
@@ -58,7 +94,7 @@ def getLastDayOfMonth(datetimeIndex):
     return startOftheMonth, endOftheMonth
 
 
-def getData(filename, thresholdNum, startDate, endDate):
+def getData(thresholdNum, startDate, endDate, filename=None, availableData=None):
     '''prepare data. filter data by the length of valid data
     Return: DATAFRAME
     Inputs:
@@ -67,7 +103,13 @@ def getData(filename, thresholdNum, startDate, endDate):
     endDate: DATETIME,
     ThresholdNum: INT, the thresholdNum of valid data to drop na
     '''
-    factorData = pd.read_csv(data_path+filename, infer_datetime_format=True, parse_dates=[0], index_col=0)
+    if availableData is not None and filename is None:
+        factorData = availableData
+    else:
+        try:
+            factorData = pd.read_csv(data_path+filename, infer_datetime_format=True, parse_dates=[0], index_col=0) # for csv
+        except:
+            factorData = readh5data(data_path, filename)  # for h5 file
     factorData = factorData.loc[startDate:endDate]
     enoughDataStock = factorData.isnull().sum() < (factorData.shape[0]*thresholdNum)
     enoughDataStockList = enoughDataStock[enoughDataStock == True].index.tolist()
@@ -180,7 +222,10 @@ def neutralizeFactor(normalizedFactorDF, normalizedLFCAPDF, IndustryDF, datelist
 
 ### This function is to generate industry dummy matrix
 def  generateIndDF(data_path,filename,timeStamp):
-    InData = pd.read_csv(data_path+filename, infer_datetime_format=True,parse_dates=[0], index_col=0)
+    try:
+        InData = pd.read_csv(data_path+filename, infer_datetime_format=True, parse_dates=[0], index_col=0)
+    except:
+        InData = readh5data(data_path, filename)
     #InData= InData.tail(timeStamp+5)[-timeStamp-1:-1].dropna(axis=1,how='any')
     InData = InData.tail(timeStamp+5)[-11:-1].dropna(axis=1, how='any')
     InduNum = int(InData.max().max()-InData.min().min())
@@ -199,7 +244,7 @@ def  generateIndDF(data_path,filename,timeStamp):
 # -------------------------the following part is to calculate the monthly return/IC of the given factor----------------
 
 
-def calcReturn(priceData,datelist,benchmark = None,activeReturn = True, logReturn = True):
+def calcReturn(priceData,datelist,benchmark=None,activeReturn = True, logReturn = True,shiftVal = -1):
     '''# To calculate the return or the active return of given date
     # Return: DATAFRAME ,that contains the RETURN/ACTIVE RETURN of each stock
     # Inputs:
@@ -208,18 +253,18 @@ def calcReturn(priceData,datelist,benchmark = None,activeReturn = True, logRetur
     # datelist: LIST ,which contains the dates.
     # activeReturn : Boolean Value. True to calculate ACTIVE RETURN
     '''
-    returnOfStocks = np.log((priceData.loc[datelist].shift(-1)/priceData.loc[datelist]).iloc[:-1]) if logReturn is True\
-            else priceData.loc[datelist].pct_change().shift(-1).iloc[:-1]
+    returnOfStocks = np.log((priceData.loc[datelist].shift(shiftVal)/priceData.loc[datelist]).iloc[:-1]) if logReturn is True\
+            else priceData.loc[datelist].pct_change().shift(shiftVal).iloc[:-1]
     if activeReturn:
-        returnOfBenchmark = np.log((benchmark.loc[datelist].shift(-1)/benchmark.loc[datelist]).iloc[:-1]) if logReturn \
-            is True else benchmark.loc[datelist].pct_change().shift(-1).iloc[:-1]
+        returnOfBenchmark = np.log((benchmark.loc[datelist].shift(shiftVal)/benchmark.loc[datelist]).iloc[:-1]) if logReturn \
+            is True else benchmark.loc[datelist].pct_change().shift(shiftVal).iloc[:-1]
         activeReturn = returnOfStocks.apply(lambda x: x - returnOfBenchmark)
         return activeReturn
     return returnOfStocks
 
 
 
-def calReturnAndIC(returnofFactor,tValueofFactor,pValueofFactor,ICFactor,factorNeutralized,activeReturn,factorName):
+def calReturnAndIC(returnofFactor,tValueofFactor,pValueofFactor,ICFactor,ICpValue,factorNeutralized,activeReturn,factorName):
     '''# This is to calculate monthly return fo the given factor, P-value, T-value, and  IC.
     # Update the four Given DATAFRAME
     # Inputs:
@@ -232,15 +277,18 @@ def calReturnAndIC(returnofFactor,tValueofFactor,pValueofFactor,ICFactor,factorN
         factorIndice = factorNeutralized.loc[date].dropna()
         activeReturnIndice = activeReturn.loc[date].dropna()
         intersections = list(set(factorIndice.index) & set(activeReturnIndice.index))
+        activeReturnIndice = activeReturnIndice.loc[intersections]
+        factorIndice = factorIndice.loc[intersections].astype(float)
         try:
-            result = sm.OLS(activeReturnIndice.loc[intersections], factorIndice.loc[intersections].astype(float)).fit()
+            result = sm.OLS(activeReturnIndice, factorIndice).fit()
+            result1 = sm.OLS(activeReturnIndice.rank(), factorIndice.rank()).fit()
         except:
             print date  # catch error
         returnofFactor.loc[date][factorName] = result.params[0]
         tValueofFactor.loc[date][factorName] = result.tvalues[0]
         pValueofFactor.loc[date][factorName] = result.pvalues[0]
-        ICFactor.loc[date][factorName] = activeReturnIndice.loc[intersections].corr(factorIndice.loc[intersections].astype(float),\
-                                                                                   method='spearman')
+        ICpValue.loc[date][factorName] = result1.pvalues[0]
+        ICFactor.loc[date][factorName] = activeReturnIndice.corr(factorIndice, method='spearman')
     #return returnofFactor, tValueofFactor, pValueofFactor, ICFactor
 
 
@@ -298,21 +346,6 @@ def showCorrelation(factor1, factor2, datelist, filterdic = None):
     return corrDF
 
 
-# this is to update the  forward adjusted Price
-# this calculation need  the additional files, namely AdjustedFactor and Price dataframe
-def calAdjustedPrice():
-    # Adjusted factor
-    AdjFacBackward=pd.read_csv(data_path+filenameAdjustFactor,infer_datetime_format=True,parse_dates=[0],index_col=0)
-    AdjFacBackward=AdjFacBackward[:]
-
-    #PriceData to Adjust
-    PriceToAdj=pd.read_csv(data_path+filenamePirce,infer_datetime_format=True,parse_dates=[0],index_col=0)
-    PriceToAdj=PriceToAdj[:]
-
-    #Calculate
-    AdjFacforward = AdjFacBackward/AdjFacBackward.max()
-    adjustedPrice = (AdjFacforward*PriceToAdj).round(5)
-    adjustedPrice.to_csv(data_path+'my_own_factor_AdjustedPriceForward.csv')
 
 
 
