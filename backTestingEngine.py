@@ -326,6 +326,8 @@ class StkBacktesting(object):
         rollingdd = (1 - (networth / pd.expanding_max(networth)))
         maxdd = rollingdd.max()
 
+        marketValue = totaldf.divide(totaldf.sum(axis=1), axis=0)
+
         self.output(u'期末净值：\t%s' % formatNumber(networth.iloc[-1]))
         self.output(u'总盈亏：\t%s' % formatNumber(totaldf.sum(axis=1).iloc[-1] - self.initCap))
         self.output(u'年化收益率：\t%s' % formatNumber(annualizedRet))
@@ -345,15 +347,26 @@ class StkBacktesting(object):
         except ImportError:
             pass
 
+        fig = plt.figure(figsize=(16, 10))
         # 净值曲线
         pCapital = plt.subplot(4, 1, 1)
         pCapital.set_ylabel("networth")
         pCapital.plot(networth.index, networth.values, color='r', lw=0.8)
+        plt.title('Networth Chart')
 
         # 最大回撤曲线
         pDD = plt.subplot(4, 1, 2)
         pDD.set_ylabel("maxdd")
         pDD.bar(rollingdd.index, rollingdd.values, color='g')
+        plt.title('Max Draw Down')
+
+        # 股票市值占比曲线
+        pMV = plt.subplot(4, 1, 3)
+        pMV.set_ylabel("percentage")
+        pMV.legend(loc='upper left')
+        pMV.stackplot(range(1, marketValue.shape[0]+1), marketValue['MarketValue'], marketValue['AvailableCash'], \
+                      labels=['MarketValue', 'AvailableCash'])
+        plt.title('Cash/MarketValue Ratio')
 
         plt.show()
 
