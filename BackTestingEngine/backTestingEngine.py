@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 from datetime import datetime,time,date
 from collections import OrderedDict
+import copy
 
 
 # Import My own library for factor testing
@@ -95,6 +96,7 @@ class StkBacktesting(object):
     def setInitCap(self, initCap):
         """设置初始资金"""
         self.initCap = initCap
+        self.availableCashNow = initCap
 
     # ----------------------------------------------------------------------
     def setCommisionRate(self, commisionRate):
@@ -199,7 +201,7 @@ class StkBacktesting(object):
     def calTurnOverRatio(self):
         """计算换手率"""
         nominator = pd.Series(self.totalTradingAmountDict).reindex(self.backTestingDateList).fillna(0)
-        denominator = pd.Series(self.totalMarketValueDict).reindex(self.backTestingDateList).fillna('ffill').dropna()
+        denominator = pd.Series(self.totalMarketValueDict).reindex(self.backTestingDateList).fillna(method='ffill').dropna()
         return (nominator[denominator.index] / denominator).mean()
 
     # ----------------------------------------------------------------------
@@ -214,16 +216,18 @@ class StkBacktesting(object):
             print 'No available data! Plz feed data first!'
 
         tradingList = []
-        holdingPnlDict = {}  # 持仓收益
+        #holdingPnlDict = {}  # 持仓收益
         tradingPnlToday = {}  # 交易收益
         # cashNetInThisDay = 0  # 资金净流入
         tradingAmountToday = 0  # 当日成交额
         tradingCommisionToday = 0  # 当日总手续费
         for order in self.allOrdersDict[date]:
-            if not np.isnan(openPrice[order.stkID]):
+            if not (np.isnan(openPrice[order.stkID]) or np.isnan(trueVolume[order.stkID])):
+                if np.floor(0.05 * trueVolume[order.stkID]) <= 1:  # 股票成交量的5%小于1则不交易
+                    continue
                 crossPrice = openPrice[order.stkID]  # 最优价格
                 # dealPrice = crossPrice    # 成交价格
-                dealVolume = min(order.volume, 0.05 * trueVolume[order.stkID])  # 最多成交当天交易量的5%
+                dealVolume = min(order.volume, np.floor(0.05 * trueVolume[order.stkID]) * 100)  # 最多成交当天交易量的5%
                 trade = OrderData(order.datetime, order.stkID, dealVolume, crossPrice, order.direction)
                 #trade.datetime = order.datetime
                 #trade.stkID = order.stkID
@@ -237,6 +241,7 @@ class StkBacktesting(object):
 
                 # 如果目前可用资金太少
                 if self.availableCashNow < - stkNetcash:
+                    print 'No enough money!'
                     continue
 
                 # 添加到tradingList里
@@ -259,11 +264,12 @@ class StkBacktesting(object):
                 tradingCommisionToday += trade.commisionCost
 
                 # 若持仓字典中已存在此股票ID
-                if trade.stkID in self.currentPositionDict:
+                if trade.stkID in self.currentPositionDict.keys():
                     # 更新持仓量
-                    holding = holdingData(0, 0)
+                    holding = holdingData(0.01, 0.01)
                     holding.volume = self.currentPositionDict[trade.stkID].volume + trade.direction * trade.volume
-
+                    #print 'position:', self.currentPositionDict[trade.stkID].volume, trade.direction
+                    #print 'new value', holding.volume
                     # 此笔为卖出交易时
                     if trade.direction == -1:
                         # 添加卖出交易的盈利至胜率计算字典
@@ -274,6 +280,7 @@ class StkBacktesting(object):
                         if holding.volume <= 0:
                             # 卖出后无持仓，则添加此笔交易到盈利字典
                             tradingPnlToday[trade.stkID] = thistradepnl
+                            #print 'delete successfully'
                             del self.currentPositionDict[trade.stkID]
                             continue
 
@@ -281,15 +288,17 @@ class StkBacktesting(object):
                     holding.averageCost = (self.currentPositionDict[trade.stkID].averageCost * self.currentPositionDict[
                         trade.stkID].volume +
                         trade.commisionCost + trade.direction * (trade.price * trade.volume)) / holding.volume
-                    #
+                    #print 'average cost:', holding.averageCost
                     self.currentPositionDict[trade.stkID] = holding
 
                 # 若不存在,此时只有在买入时才会添加持仓信息,相当于新买入。
                 else:
+                    #print 'no position!'
                     if trade.direction == 1:
-                        holding = holdingData(0, 0)
+                        holding = holdingData(0.01, 0.01)
                         holding.volume = trade.direction * trade.volume
                         holding.averageCost = trade.price * (1 + self.commisionRate)
+                        #print date, trade.stkID, holding.volume, trade.volume
 
                         self.currentPositionDict[trade.stkID] = holding
 
@@ -297,14 +306,15 @@ class StkBacktesting(object):
                         print 'Short is not allowed in Stock Market of China!!'
 
                 # 计算总的持仓收益
-                holdingPnlDict[trade.stkID] = (closePrice[trade.stkID] - self.currentPositionDict[
-                    trade.stkID].averageCost) * self.currentPositionDict[trade.stkID].volume
+                # 此步有误！
+                #holdingPnlDict[trade.stkID] = (closePrice[trade.stkID] - self.currentPositionDict[
+                #    trade.stkID].averageCost) * self.currentPositionDict[trade.stkID].volume
 
             else:
                 continue
 
         # 计算当日交易完后的总市值（收盘时）
-        self.totalMarketValueDict[date] = self.calTotalMarketValue(closePrice)
+        #self.totalMarketValueDict[date] = self.calTotalMarketValue(closePrice)
 
         # 计算当日交易完后的可用资金
         self.availableCashDict[date] = self.availableCashNow
@@ -316,16 +326,28 @@ class StkBacktesting(object):
         self.totalCommisionDict[date] = tradingCommisionToday
 
         # 保存当日持仓Pnl至持仓Pnl信息字典
-        self.holdingPnlDict[date] = holdingPnlDict
+        #self.holdingPnlDict[date] = holdingPnlDict
 
         # 当日交易Pnl
         self.tradingPnlDict[date] = tradingPnlToday
 
         # 保存当日持仓字典
-        self._allCurrentPositionDict[date] = self.currentPositionDict
+        copyCP = copy.deepcopy(self.currentPositionDict)
+        self._allCurrentPositionDict[date] = copyCP
 
         # 保存当日成交信息至成交字典
         self.tradeDict[date] = tradingList
+
+    # ----------------------------------------------------------------------
+    def updateHoldingInfo(self, date):
+        """每日收盘前更新总市值总持仓收益"""
+        holdingPnl = {}
+        closePrice = self.dataDict['adjClose'].loc[date]
+        self.totalMarketValueDict[date] = self.calTotalMarketValue(closePrice)  # 更新总市值
+        for stkID, holding in self.currentPositionDict.iteritems():
+            holdingPnl[stkID] = (closePrice[stkID] - holding.averageCost) * holding.volume
+        # 保存当日持仓Pnl至持仓Pnl信息字典
+        self.holdingPnlDict[date] = holdingPnl
 
     # ----------------------------------------------------------------------
     def output(self, content):
@@ -342,8 +364,8 @@ class StkBacktesting(object):
         winrate = winrate[winrate > 0].shape[0] / winrate .shape[0]
         totaldf = self.calTotalAsset()  # 计算总资产
         networth = totaldf.sum(axis=1) / totaldf.sum(axis=1).iloc[0]
-        annualizedRet = (networth.iloc[-1]) ** (12 / networth.shape[0]) - 1
-        annualizedvol = np.sqrt(12) * networth.pct_change().iloc[1:].std()
+        annualizedRet = (networth.iloc[-1]) ** (250 / networth.shape[0]) - 1
+        annualizedvol = np.sqrt(250) * networth.pct_change().iloc[1:].std()
         sharpe = annualizedRet / annualizedvol
         rollingdd = (1 - (networth / networth.expanding().max()))
         maxdd = rollingdd.max()
